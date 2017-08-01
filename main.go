@@ -1,19 +1,38 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/justwatchcom/elasticsearch_exporter/collector"
+	"github.com/kylemcc/prom2cloudwatch"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+type logWrapper struct {
+	log.Logger
+}
+
+func (l *logWrapper) Println(v ...interface{}) {
+	var buf bytes.Buffer
+	for c, i := range v {
+		buf.WriteString(fmt.Sprintf("%v", i))
+		if c < len(v)-1 {
+			buf.WriteByte(' ')
+		}
+	}
+	level.Info(l.Logger).Log("msg", "")
+}
 
 func main() {
 	var (
@@ -25,6 +44,7 @@ func main() {
 		esCA               = flag.String("es.ca", "", "Path to PEM file that conains trusted CAs for the Elasticsearch connection.")
 		esClientPrivateKey = flag.String("es.client-private-key", "", "Path to PEM file that conains the private key for client auth when connecting to Elasticsearch.")
 		esClientCert       = flag.String("es.client-cert", "", "Path to PEM file that conains the corresponding cert for the private key to connect to Elasticsearch.")
+		cwBridgeEnabled    = flag.Bool("cloudwatch.enabled", false, "Enable pushing metrics to AWS CloudWatch")
 	)
 	flag.Parse()
 
@@ -64,12 +84,42 @@ func main() {
 		"addr", *listenAddress,
 	)
 
-	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
-		level.Error(logger).Log(
-			"msg", "http server quit",
-			"err", err,
-		)
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+
+	if *cwBridgeEnabled {
+		level.Info(logger).Log("msg", "starting CloudWatch Bridge")
+		cwb, err := prom2cloudwatch.NewBridge(&prom2cloudwatch.Config{
+			PrometheusNamespace: "elasticsearch",
+			CloudWatchNamespace: "ElasticSearch",
+			Logger:              &logWrapper{logger},
+			Interval:            5 * time.Second,
+		})
+		if err != nil {
+			level.Error(logger).Log("msg", "error initializing CloudWatch Bridge", "err", err)
+			os.Exit(1)
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cwb.Run(ctx)
+		}()
 	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := http.ListenAndServe(*listenAddress, nil); err != nil {
+			level.Error(logger).Log(
+				"msg", "http server quit",
+				"err", err,
+			)
+		}
+		cancel()
+	}()
+
+	wg.Wait()
 }
 
 // IndexHandler returns a http handler with the correct metricsPath

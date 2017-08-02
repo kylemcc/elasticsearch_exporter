@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,6 +46,7 @@ func main() {
 		esClientPrivateKey = flag.String("es.client-private-key", "", "Path to PEM file that conains the private key for client auth when connecting to Elasticsearch.")
 		esClientCert       = flag.String("es.client-cert", "", "Path to PEM file that conains the corresponding cert for the private key to connect to Elasticsearch.")
 		cwBridgeEnabled    = flag.Bool("cloudwatch.enabled", false, "Enable pushing metrics to AWS CloudWatch")
+		cwWhitelistPath    = flag.String("cloudwatch.whitelist.path", "", "Path to a whitelist file containing a list of metrics to push to cloudwatch when -cloudwatch.enabled=true")
 	)
 	flag.Parse()
 
@@ -89,11 +91,22 @@ func main() {
 
 	if *cwBridgeEnabled {
 		level.Info(logger).Log("msg", "starting CloudWatch Bridge")
+		var whitelist []string
+		if *cwWhitelistPath != "" {
+			if l, err := loadCloudwatchWhitelist(*cwWhitelistPath); err != nil {
+				level.Error(logger).Log("msg", "error initializing CloudWatch Bridge", "err", err)
+				os.Exit(1)
+			} else {
+				whitelist = l
+			}
+		}
 		cwb, err := prom2cloudwatch.NewBridge(&prom2cloudwatch.Config{
 			PrometheusNamespace: "elasticsearch",
 			CloudWatchNamespace: "ElasticSearch",
 			Logger:              &logWrapper{logger},
 			Interval:            5 * time.Second,
+			WhitelistOnly:       len(whitelist) > 0,
+			Whitelist:           whitelist,
 		})
 		if err != nil {
 			level.Error(logger).Log("msg", "error initializing CloudWatch Bridge", "err", err)
@@ -142,4 +155,13 @@ func IndexHandler(metricsPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Write(index)
 	}
+}
+
+func loadCloudwatchWhitelist(path string) ([]string, error) {
+	f, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	f = bytes.TrimSpace(f)
+	return strings.Split(string(f), "\n"), nil
 }

@@ -3,7 +3,6 @@ package prom2cloudwatch
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -54,7 +53,12 @@ type Config struct {
 	// Only publish whitelisted metrics
 	WhitelistOnly bool
 
+	// List of metrics that should be published, causing all others to be ignored.
+	// Config.WhitelistOnly must be set to true for this to take effect.
 	Whitelist []string
+
+	// List of metrics that should never be published. This setting overrides entries in Config.Whitelist
+	Blacklist []string
 }
 
 // Bridge pushes metrics to AWS Cloudwatch
@@ -67,6 +71,7 @@ type Bridge struct {
 
 	useWhitelist bool
 	whitelist    map[string]struct{}
+	blacklist    map[string]struct{}
 
 	logger Logger
 	g      prometheus.Gatherer
@@ -81,15 +86,13 @@ func NewBridge(c *Config) (*Bridge, error) {
 
 	if c.PrometheusNamespace == "" {
 		return nil, errors.New("PrometheusNamespace must not be empty")
-	} else {
-		b.promNamespace = c.PrometheusNamespace
 	}
+	b.promNamespace = c.PrometheusNamespace
 
 	if c.CloudWatchNamespace == "" {
 		return nil, errors.New("CloudWatchNamespace must not be empty")
-	} else {
-		b.cwNamespace = c.CloudWatchNamespace
 	}
+	b.cwNamespace = c.CloudWatchNamespace
 
 	if c.Interval > 0 {
 		b.interval = c.Interval
@@ -126,6 +129,13 @@ func NewBridge(c *Config) (*Bridge, error) {
 		b.whitelist[v] = struct{}{}
 	}
 
+	b.blacklist = make(map[string]struct{}, len(c.Blacklist))
+	for _, v := range c.Blacklist {
+		b.blacklist[v] = struct{}{}
+	}
+
+	// Use default credential provider, which I believe supports the standard
+	// AWS_* environment variables, and the shared credential file under ~/.aws
 	sess, err := session.NewSession(&aws.Config{HTTPClient: client})
 	if err != nil {
 		return nil, err
@@ -135,10 +145,10 @@ func NewBridge(c *Config) (*Bridge, error) {
 	return b, nil
 }
 
-// From https://github.com/prometheus/client_golang/blob/master/prometheus/graphite/bridge.go
 // Logger is the minimal interface Bridge needs for logging. Note that
 // log.Logger from the standard library implements this interface, and it is
 // easy to implement by custom loggers, if they don't do so already anyway.
+// Taken from https://github.com/prometheus/client_golang/blob/master/prometheus/graphite/bridge.go
 type Logger interface {
 	Println(v ...interface{})
 }
@@ -175,12 +185,10 @@ func (b *Bridge) Publish() error {
 	return b.publishMetrics(mfs)
 }
 
-// NOTES:
+// NOTE: The CloudWatch API has the following limitations:
 //		- Max 40kb request size
 //		- Single namespace per request
 //		- Max 10 dimensions per metric
-//		- Need unit
-//		- Need resolution (1 or 60 = second or minute granularity)
 func (b *Bridge) publishMetrics(mfs []*dto.MetricFamily) error {
 	vec, err := expfmt.ExtractSamples(&expfmt.DecodeOptions{
 		Timestamp: model.Now(),
@@ -194,10 +202,9 @@ func (b *Bridge) publishMetrics(mfs []*dto.MetricFamily) error {
 		name := getName(s.Metric)
 		if b.isWhitelisted(name) {
 			data = appendDatum(data, name, s)
-		} else {
-			//fmt.Printf("discarding metric: name:[%q] [%+v]\n", name, s)
 		}
 
+		// punt on the 40KB size limitation. Will see how this works out in practice
 		if len(data) == batchSize {
 			if err := b.flush(data); err != nil {
 				b.logger.Println("error publishing to Cloudwatch:", err)
@@ -211,13 +218,20 @@ func (b *Bridge) publishMetrics(mfs []*dto.MetricFamily) error {
 
 func (b *Bridge) flush(data []*cloudwatch.MetricDatum) error {
 	if len(data) > 0 {
-		fmt.Printf("Publishing data: %+v\n", data)
+		in := &cloudwatch.PutMetricDataInput{
+			MetricData: data,
+			Namespace:  &b.cwNamespace,
+		}
+		_, err := b.cw.PutMetricData(in)
+		return err
 	}
 	return nil
 }
 
 func (b *Bridge) isWhitelisted(name string) bool {
 	if !strings.HasPrefix(name, b.promNamespace) {
+		return false
+	} else if _, ok := b.blacklist[name]; ok {
 		return false
 	}
 
@@ -251,7 +265,7 @@ func getName(m model.Metric) string {
 
 // getDimensions returns up to 10 dimensions for the provided metric - one for each label (except the __name__ label)
 //
-// If a metric has more than 10 labels, it attempts to behave determinically by sorting the labels lexicographically,
+// If a metric has more than 10 labels, it attempts to behave deterministically by sorting the labels lexicographically,
 // and returning the first 10 labels as dimensions
 func getDimensions(m model.Metric) []*cloudwatch.Dimension {
 	if len(m) == 0 {
@@ -285,6 +299,7 @@ func getResolution(m model.Metric) int64 {
 	return 60
 }
 
+// TODO: can we infer the proper unit based on the metric name?
 func getUnit(m model.Metric) string {
 	if u, ok := m[cwUnitLabel]; ok {
 		return string(u)

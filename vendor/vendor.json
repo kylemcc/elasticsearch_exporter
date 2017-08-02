@@ -203,9 +203,10 @@
 			"revisionTime": "2014-02-26T03:06:59Z"
 		},
 		{
-			"checksumSHA1": "1C48NKrWeN4aOVOwmgyYrUZV9Kc=",
+			"checksumSHA1": "NO6CtUujrWD+xtGJjVy5L4gjSIo=",
 			"path": "github.com/kylemcc/prom2cloudwatch",
-			"revision": ""
+			"revision": "9b49150ecd008834dbdd65eff5551e93cb3d3cf3",
+			"revisionTime": "2017-08-02T14:54:55Z"
 		},
 		{
 			"checksumSHA1": "bKMZjd2wPw13VwoE7mBeSv5djFA=",

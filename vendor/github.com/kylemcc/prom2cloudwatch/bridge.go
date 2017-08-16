@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	batchSize = 100
+	batchSize = 20
 
 	cwHighResLabel = "__cw_high_res"
 	cwUnitLabel    = "__cw_unit"

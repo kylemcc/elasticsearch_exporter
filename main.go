@@ -49,6 +49,7 @@ func main() {
 		cwWhitelistPath    = flag.String("cloudwatch.whitelist.path", "", "Path to a whitelist file containing a list of metrics to push to cloudwatch when -cloudwatch.enabled=true")
 		cwPublishInterval  = flag.Duration("cloudwatch.publish.interval", 15*time.Second, "Frequency with which metrics should be published to CloudWatch")
 		cwNamespace        = flag.String("cloudwatch.namespace", "ElasticSearch", "CloudWatch namespace under which metrics should be published")
+		cwRegion           = flag.String("cloudwatch.region", "us-east-1", "AWS Region to use")
 	)
 	flag.Parse()
 
@@ -105,6 +106,7 @@ func main() {
 		cwb, err := prom2cloudwatch.NewBridge(&prom2cloudwatch.Config{
 			PrometheusNamespace: "elasticsearch",
 			CloudWatchNamespace: *cwNamespace,
+			CloudWatchRegion:    *cwRegion,
 			Logger:              &logWrapper{logger},
 			Interval:            *cwPublishInterval,
 			WhitelistOnly:       len(whitelist) > 0,

@@ -33,6 +33,9 @@ type Config struct {
 	// Required. The CloudWatch namespace under which metrics should be published
 	CloudWatchNamespace string
 
+	// Required. The AWS Region to use
+	CloudWatchRegion string
+
 	// The frequency with which metrics should be published to Cloudwatch. Default: 15s
 	Interval time.Duration
 
@@ -136,7 +139,7 @@ func NewBridge(c *Config) (*Bridge, error) {
 
 	// Use default credential provider, which I believe supports the standard
 	// AWS_* environment variables, and the shared credential file under ~/.aws
-	sess, err := session.NewSession(&aws.Config{HTTPClient: client})
+	sess, err := session.NewSession(aws.NewConfig().WithHTTPClient(client).WithRegion(c.CloudWatchRegion))
 	if err != nil {
 		return nil, err
 	}

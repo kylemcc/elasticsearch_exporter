@@ -47,6 +47,8 @@ func main() {
 		esClientCert       = flag.String("es.client-cert", "", "Path to PEM file that conains the corresponding cert for the private key to connect to Elasticsearch.")
 		cwBridgeEnabled    = flag.Bool("cloudwatch.enabled", false, "Enable pushing metrics to AWS CloudWatch")
 		cwWhitelistPath    = flag.String("cloudwatch.whitelist.path", "", "Path to a whitelist file containing a list of metrics to push to cloudwatch when -cloudwatch.enabled=true")
+		cwPublishInterval  = flag.Duration("cloudwatch.publish.interval", 15*time.Second, "Frequency with which metrics should be published to CloudWatch")
+		cwNamespace        = flag.String("cloudwatch.namespace", "ElasticSearch", "CloudWatch namespace under which metrics should be published")
 	)
 	flag.Parse()
 
@@ -102,9 +104,9 @@ func main() {
 		}
 		cwb, err := prom2cloudwatch.NewBridge(&prom2cloudwatch.Config{
 			PrometheusNamespace: "elasticsearch",
-			CloudWatchNamespace: "ElasticSearch",
+			CloudWatchNamespace: *cwNamespace,
 			Logger:              &logWrapper{logger},
-			Interval:            5 * time.Second,
+			Interval:            *cwPublishInterval,
 			WhitelistOnly:       len(whitelist) > 0,
 			Whitelist:           whitelist,
 		})

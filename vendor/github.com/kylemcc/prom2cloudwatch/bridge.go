@@ -307,5 +307,5 @@ func getUnit(m model.Metric) string {
 	if u, ok := m[cwUnitLabel]; ok {
 		return string(u)
 	}
-	return ""
+	return "None"
 }

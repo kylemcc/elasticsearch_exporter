@@ -32,7 +32,7 @@ func (l *logWrapper) Println(v ...interface{}) {
 			buf.WriteByte(' ')
 		}
 	}
-	level.Info(l.Logger).Log("msg", "")
+	level.Info(l.Logger).Log("msg", buf.String())
 }
 
 func main() {
